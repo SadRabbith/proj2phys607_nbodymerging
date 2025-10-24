@@ -109,7 +109,7 @@ class StarClusters:
 
     def merge_pair(self, i, j):
         """Merge stars i and j -> conserve momentum. New star replaces index i; remove j."""
-        
+
         if j < 0 or j >= self.N:
             return
         m1, m2 = self.m[i], self.m[j]
@@ -146,6 +146,29 @@ class StarClusters:
         u1_par, u2_par = u2_par, u1_par
         self.v[i] = v_cm + u1_par + u1_perp
         self.v[j] = v_cm + u2_par + u2_perp
+
+def ode_func(t, y, masses):
+    """
+    y: flattened [r (3N), v (3N)]
+    returns y' = [v, a]
+    masses: array of shape (N,)
+    """
+    N = masses.size
+    r = y[:3 * N].reshape((N, 3))
+    v = y[3 * N:].reshape((N, 3))
+    a = np.zeros_like(r)
+    
+    for i in range(N):
+       
+        rij = r - r[i]
+        dist3 = np.sum(rij * rij, axis=1) ** (1.5)
+        # avoid self division
+        dist3[i] = np.inf
+        
+        a[i] = G * np.sum((masses[:, None] * rij) / dist3[:, None], axis=0)
+    dydt = np.concatenate([v.ravel(), a.ravel()])
+    return dydt
+
 
     
 
