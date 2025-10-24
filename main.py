@@ -107,6 +107,48 @@ class StarClusters:
         mask[idx] = False
         self.m, self.r, self.v, self.N = self.m[mask], self.r[mask], self.v[mask], self.N = self.m.size
 
+    def merge_pair(self, i, j):
+        """Merge stars i and j -> conserve momentum. New star replaces index i; remove j."""
+        
+        if j < 0 or j >= self.N:
+            return
+        m1, m2 = self.m[i], self.m[j]
+        total_m = m1 + m2
+        new_v = (m1 * self.v[i] + m2 * self.v[j]) / total_m
+        # Place merged star at mass-weighted center
+        new_r = (m1 * self.r[i] + m2 * self.r[j]) / total_m
+        self.m[i] = total_m
+        self.v[i] = new_v
+        self.r[i] = new_r
+        # remove j (ensure we remove the higher index first for safety)
+        self.remove_index(j if j > i else j)
+
+    def scatter_pair_elastic(self, i, j):
+        """
+        elastic scattering in the two-body approximation:
+        - Transform to center-of-mass frame, reflect relative velocity across line-of-centers randomly
+        - This is an approximation; in a real two-body scattering you'd solve for post-scatter velocities
+          given impact parameter and scattering law.
+        """
+        m1, m2 = self.m[i], self.m[j]
+        r_rel = self.r[i] - self.r[j]
+        rhat = r_rel / (np.linalg.norm(r_rel) + 1e-12)
+        v1, v2 = self.v[i].copy(), self.v[j].copy()
+        v_cm = (m1 * v1 + m2 * v2) / (m1 + m2)
+        u1 = v1 - v_cm
+        u2 = v2 - v_cm
+        # reflect the component along rhat for each particle (simple model)
+        u1_par = np.dot(u1, rhat) * rhat
+        u1_perp = u1 - u1_par
+        u2_par = np.dot(u2, rhat) * rhat
+        u2_perp = u2 - u2_par
+        # swap parallel components (approx elastic exchange)
+        u1_par, u2_par = u2_par, u1_par
+        self.v[i] = v_cm + u1_par + u1_perp
+        self.v[j] = v_cm + u2_par + u2_perp
+
+    
+
     
 
 
