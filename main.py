@@ -34,3 +34,20 @@ class SamplingTool:
         x = (u * (max - min) +min)**(1 / powl) 
 
         return x 
+    
+    @staticmethod
+    def rejection_sampling_MB(scale, size = 1, vmax = None, random_state = None):
+        range_val = np.random.default_rng(random_state)
+        if vmax is None: 
+            vmax = scale * 6
+        sample = [] 
+
+        n = size 
+        vx = range_val.normal(scale = scale, size =n)
+        vy = range_val.normal(scale = scale, size = n)
+        vz = range_val.normal(scale = scale, size =n) 
+        speeds = np.sqrt(vx**2 + vy**2 + vz**2) 
+
+        return speeds
+    
+
