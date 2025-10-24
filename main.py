@@ -84,7 +84,32 @@ class StarClusters:
         vy = speeds* np.sin(theta) * np.sin(phi) 
         vz = speeds * np.cos(theta) 
 
-        vel = np.vstack(masses = masses, positions = pos, velocities = vel) 
+        vel = np.vstack(masses = masses, positions = pos, velocities = vel)
+
+
+    def get_state_vector(self):
+        """Return flattened state vector y = [r.flatten(), v.flatten()]"""
+        y = np.concatenate([self.r.ravel(), self.v.ravel()])
+        return y
+
+
+    def update_state_vector(self,y):
+
+        N = self.N 
+
+        r = y[:3*N].reshapre((N,3))
+        v = y[3*N].reshapre((N,3)) 
+        self.r, self.v = r.copy(), v.copy() 
+
+    def remove_index(self, idx): 
+
+        mask = np.ones(self.N, dtype = bool) 
+        mask[idx] = False
+        self.m, self.r, self.v, self.N = self.m[mask], self.r[mask], self.v[mask], self.N = self.m.size
+
+    
+
+
 
     
 
