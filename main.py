@@ -63,7 +63,30 @@ class StarClusters:
         self.N = self.m.size 
     
     @staticmethod
-    def initialize_random() #MC methods to find masses radial positions and velocities
+    def initialize_random(cls, N, mass_alpha = 2.35, mass_min = 0.5, mass_max = 5.0, radius_scale = 1.0, 
+                          velocity_scale = 0.5, random_scale = None): #MC methods to find masses radial positions and velocities
+        
+        range_val = np.random.default_rng(random_scale)
+        masses = SamplingTool.inverse_cdf_powerlaw(alpha = mass_alpha, xmin = mass_min, xmax = mass_max, size = N, random_state=range_val)
+
+        u = range_val.random(size = N) 
+        pos = range_val.normal(scale=radius_scale, size = (N,3)) 
+
+        pos = pos / np.linalg.norm(pos, axis = 1)[;, None] *(np.abs(range_val.normal(radius_scale, size =N))[:, None]) 
+
+        pos = range_val.normal(scale = radius_scale, size= (N,3)) 
+
+        speeds = SamplingTool.rejection_sampling_MB(scale = velocity_scale, size = N, random_state= range_val) 
+
+        theta = np.arccos(1 - 2 *range_val.random(size = N)) 
+        phi = 2 * np.pi * range_val. random(size = N) 
+        vx = speeds * np.sin(theta) * np.cos(phi) 
+        vy = speeds* np.sin(theta) * np.sin(phi) 
+        vz = speeds * np.cos(theta) 
+
+        vel = np.vstack(masses = masses, positions = pos, velocities = vel) 
 
     
+
+
 
