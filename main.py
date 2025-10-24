@@ -50,4 +50,10 @@ class SamplingTool:
 
         return speeds
     
+class StarClusters: 
+    """stores star properties""" 
 
+    def _init_(self, masses, positions, velocities):
+
+        assert masses.shape[0] == positions.shape[0] == velocities.shape[0] 
+        
