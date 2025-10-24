@@ -56,4 +56,14 @@ class StarClusters:
     def _init_(self, masses, positions, velocities):
 
         assert masses.shape[0] == positions.shape[0] == velocities.shape[0] 
-        
+
+        self.m = masses.astype(float) 
+        self.r = positions.astype(float) 
+        self.v = velocities.astype(float) 
+        self.N = self.m.size 
+    
+    @staticmethod
+    def initialize_random() #MC methods to find masses radial positions and velocities
+
+    
+
