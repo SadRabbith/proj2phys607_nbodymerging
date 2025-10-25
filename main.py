@@ -169,6 +169,21 @@ def ode_func(t, y, masses):
     dydt = np.concatenate([v.ravel(), a.ravel()])
     return dydt
 
+def default_merge(star_cluster: StarClusters, i, j, v_rel_threshold = 1): 
+
+    v_rel = np.linalg.norm(star_cluster.v[i] - star_cluster.v[j])
+
+    k = 5.0 
+    x = (v_rel_threshold - v_rel) / v_rel_threshold
+
+    p = 1.0/ (1.0 + np.exp(-k*x)) 
+    
+    return float(np.clip(p, 0.0, 1.0))
+
+class Simulator: 
+
+    
+
 
     
 
