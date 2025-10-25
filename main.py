@@ -72,7 +72,7 @@ class StarClusters:
         u = range_val.random(size = N) 
         pos = range_val.normal(scale=radius_scale, size = (N,3)) 
 
-        pos = pos / np.linalg.norm(pos, axis = 1)[;, None] *(np.abs(range_val.normal(radius_scale, size =N))[:, None]) 
+        pos = pos / np.linalg.norm(pos, axis = 1)[:, None] *(np.abs(range_val.normal(radius_scale, size =N))[:, None]) 
 
         pos = range_val.normal(scale = radius_scale, size= (N,3)) 
 
@@ -180,18 +180,83 @@ def default_merge(star_cluster: StarClusters, i, j, v_rel_threshold = 1):
     
     return float(np.clip(p, 0.0, 1.0))
 
-class Simulator: 
+class Simulator:
+    """runs the simulation loop"""
 
+    def __init__(self, cluster: StarClusters, t_end=1.0, r_c=0.1, dt_event=0.01,
+                 p_merge_func=None, max_step=0.01, rng_seed=None):
+        self.cluster = cluster
+        self.t_end = t_end
+        self.r_c = r_c
+        self.dt_event = dt_event  # interval between event checks
+        self.p_merge_func = p_merge_func if p_merge_func is not None else default_merge
+        self.max_step = max_step
+        self.rng = np.random.default_rng(rng_seed)
+
+    def detect_collision_pair(self): 
+
+        N = self.cluster.N
+        r = self.cluster.r 
+
+        for i in range(N): 
+            rij = r[i+1:] - r[i]
+            d2 = np.sum(rij**2, axis = 1)
+            small = np.where(d2<self.r_c * self.r_c)[0]
+
+            if small.size>0:
+                j = i+1 + int(small[0])
+                return i, j 
+        return None
+    def run(self, verbose = None):
+        t = 0.0 
+        cluster = self.cluster
+
+        results = []
+
+        y = cluster.get_state_vector()
+
+        while t < self.t_end and cluster.N >=2: 
+            t_next = min(t + self.dt_event, self.t_end)
+
+            masses =cluster.m.copy() 
+            sol = solve_ivp(fun = lambda tt,yy: ode_func(tt, yy, masses), t_span = (t, t_next), y0=y, method = 'RK45', max_step = self.max_step,
+                            rtol = 1e-6, atol = 1e-9) 
+            
+            y = sol.y[:, -1]
+
+            cluster.update_state_vector(y)
+
+            t = sol.t[-1]
+
+            if verbose: print(f"[t = {t:4f}] N = {cluster.N}")
+
+            pair = self.detect_collision_pair()
+
+            if pair is not None: 
+                i, j = pair 
+                p_merge = self.p_merge_func(cluster, i ,j)
+                u = self.rng.random()
+                if verbose: 
+                    vrel = np.linalg.norm(cluster.v[i]- cluster.v[j])
+                    print(f" colliusion detected between {i} and {j}: r = {np.linalg.norm(cluster.r[i]-cluster.r[j]): .4e}, v_rel = {vrel:.4f}, p merge = {p_merge: 3f}, u ={u:.3f}")
+                
+                if u< p_merge: 
+
+                    if j<i :
+                        i,j = j, i
+                    
+                    cluster.merge_pair(i,j)
+                    if verbose:
+                        print(f"  merged -> new N= {cluster.N}")
+                
+                else: 
+                    cluster.scatter_pair_elastic(i, j)
+                    if verbose: print(f"   scattered(elastic)")
+
+                y = cluster.get_state_vector()
+
+            results.append((t, cluster.m.copy(), cluster.r.copy(), cluster.v.copy()))
+
+        return results
     
-
-
-    
-
-    
-
-
-
-    
-
-
-
+class Analysis:                    
