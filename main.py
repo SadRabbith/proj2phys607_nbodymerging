@@ -1,5 +1,6 @@
 import numpy as np 
 import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
 import statistics 
 import math 
 import time 
@@ -22,16 +23,16 @@ class SamplingTool:
         """
 
         range_val = np.random.default_rng(random_state)
-        u = range_val(size)
+        u = range_val.random(size)
 
         if alpha == 1.0: 
             np.exp(u * (np.log(xmax) - np.log(xmin)) + np.log(xmin))
         
         powl = 1.0 - alpha
-        min = xmin ** powl 
-        max = xmax ** powl 
+        min_val = xmin ** powl 
+        max_val = xmax ** powl 
 
-        x = (u * (max - min) +min)**(1 / powl) 
+        x = (u * (max_val - min_val) +min_val)**(1 / powl) 
 
         return x 
     
@@ -53,7 +54,7 @@ class SamplingTool:
 class StarClusters: 
     """stores star properties""" 
 
-    def _init_(self, masses, positions, velocities):
+    def __init__(self, masses, positions, velocities):
 
         assert masses.shape[0] == positions.shape[0] == velocities.shape[0] 
 
@@ -62,11 +63,11 @@ class StarClusters:
         self.v = velocities.astype(float) 
         self.N = self.m.size 
     
-    @staticmethod
+    @classmethod
     def initialize_random(cls, N, mass_alpha = 2.35, mass_min = 0.5, mass_max = 5.0, radius_scale = 1.0, 
-                          velocity_scale = 0.5, random_scale = None): #MC methods to find masses radial positions and velocities
+                          velocity_scale = 0.5, random_state = None): #MC methods to find masses radial positions and velocities
         
-        range_val = np.random.default_rng(random_scale)
+        range_val = np.random.default_rng(random_state)
         masses = SamplingTool.inverse_cdf_powerlaw(alpha = mass_alpha, xmin = mass_min, xmax = mass_max, size = N, random_state=range_val)
 
         u = range_val.random(size = N) 
@@ -84,7 +85,9 @@ class StarClusters:
         vy = speeds* np.sin(theta) * np.sin(phi) 
         vz = speeds * np.cos(theta) 
 
-        vel = np.vstack(masses = masses, positions = pos, velocities = vel)
+        vel = np.vstack([vx, vy,vx]).T
+
+        return cls(masses = masses, positions = pos, velocities = vel)
 
 
     def get_state_vector(self):
@@ -97,15 +100,19 @@ class StarClusters:
 
         N = self.N 
 
-        r = y[:3*N].reshapre((N,3))
-        v = y[3*N].reshapre((N,3)) 
+        r = y[:3*N].reshape((N,3))
+        v = y[3*N].reshape((N,3)) 
         self.r, self.v = r.copy(), v.copy() 
 
     def remove_index(self, idx): 
 
         mask = np.ones(self.N, dtype = bool) 
         mask[idx] = False
-        self.m, self.r, self.v, self.N = self.m[mask], self.r[mask], self.v[mask], self.N = self.m.size
+        self.m = self.m[mask]
+        self.r = self.r[mask]
+        self.v = self.v[mask]
+        self.N = self.m.size
+
 
     def merge_pair(self, i, j):
         """Merge stars i and j -> conserve momentum. New star replaces index i; remove j."""
@@ -238,7 +245,7 @@ class Simulator:
                 u = self.rng.random()
                 if verbose: 
                     vrel = np.linalg.norm(cluster.v[i]- cluster.v[j])
-                    print(f" colliusion detected between {i} and {j}: r = {np.linalg.norm(cluster.r[i]-cluster.r[j]): .4e}, v_rel = {vrel:.4f}, p merge = {p_merge: 3f}, u ={u:.3f}")
+                    print(f" collision detected between {i} and {j}: r = {np.linalg.norm(cluster.r[i]-cluster.r[j]): .4e}, v_rel = {vrel:.4f}, p merge = {p_merge: 3f}, u ={u:.3f}")
                 
                 if u< p_merge: 
 
@@ -259,4 +266,50 @@ class Simulator:
 
         return results
     
-class Analysis:                    
+class Analysis:
+    """Simple analysis utilities."""
+
+    @staticmethod
+    def check_momentum_conservation(before_cluster: StarClusters, after_cluster: StarClusters, tol=1e-6):
+        """Compute total momentum difference (Note: merges alter N)"""
+        P_before = np.sum(before_cluster.m[:, None] * before_cluster.v, axis=0)
+        P_after = np.sum(after_cluster.m[:, None] * after_cluster.v, axis=0)
+        diff = np.linalg.norm(P_before - P_after)
+        return diff
+
+    @staticmethod
+    def final_mass_stats(cluster: StarClusters):
+        ms = cluster.m
+        return {'N': cluster.N, 'min': float(ms.min()), 'max': float(ms.max()),
+                'mean': float(ms.mean()), 'median': float(np.median(ms))}
+
+
+def demo_run():
+    """Run a short demo with N ~ 50 to show the pipeline."""
+    N = 50
+    print("Initializing cluster...")
+    cluster = StarClusters.initialize_random(N=N, mass_alpha=2.35, mass_min=0.5, mass_max=3.0,
+                                            radius_scale=1.0, velocity_scale=0.5, random_state=42)
+    sim = Simulator(cluster, t_end=0.5, r_c=0.05, dt_event=0.01, max_step=0.005, rng_seed=123)
+    t0 = time.time()
+    results = sim.run(verbose=True)
+    t1 = time.time()
+    print(f"Simulation finished in {t1 - t0:.2f}s, steps recorded: {len(results)}")
+    final_cluster = sim.cluster
+    print("Final mass stats:", Analysis.final_mass_stats(final_cluster))
+    # Optionally plot final mass histogram if matplotlib is available
+    try:
+        import matplotlib.pyplot as plt
+        m = final_cluster.m
+        plt.figure()
+        plt.hist(m, bins='auto')
+        plt.title("Final Mass Distribution")
+        plt.xlabel("Mass")
+        plt.ylabel("Count")
+        plt.show()
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    demo_run()     
