@@ -185,7 +185,7 @@ def ode_func(t, y, masses):
     dydt = np.concatenate([v.ravel(), a.ravel()])
     return dydt
 
-def default_merge(star_cluster: StarClusters, i, j, v_rel_threshold = 1): 
+def default_merge(star_cluster: StarClusters, i, j, v_rel_threshold = 15): 
 
     v_rel = np.linalg.norm(star_cluster.v[i] - star_cluster.v[j])
 
@@ -209,6 +209,39 @@ class Simulator:
         self.max_step = max_step
         self.rng = np.random.default_rng(rng_seed)
 
+    def compute_energy(self):
+        """
+        Compute total energy (kinetic + potential) of the cluster.
+        
+        Returns
+        -------
+        KE : float
+            Total kinetic energy
+        PE : float
+            Total gravitational potential energy
+        E_tot : float
+            Total energy (KE + PE)
+        
+        Notes
+        -----
+        Uses pairwise summation for potential energy calculation.
+        Includes small softening parameter (1e-10) to avoid singularities.
+        """
+        cluster = self.cluster
+        
+        # Kinetic energy: (1/2) * sum(m * v^2)
+        KE = 0.5 * np.sum(cluster.m * np.sum(cluster.v**2, axis=1))
+        
+        # Potential energy: -G * sum_i sum_{j>i} (mi * mj / rij)
+        PE = 0.0
+        N = cluster.N
+        for i in range(N):
+            rij = cluster.r[i+1:] - cluster.r[i]
+            dist = np.linalg.norm(rij, axis=1)
+            PE += -G * cluster.m[i] * np.sum(cluster.m[i+1:] / (dist + 1e-10))
+        
+        return KE, PE, KE + PE
+
     def detect_collision_pair(self): 
 
         N = self.cluster.N
@@ -229,6 +262,10 @@ class Simulator:
 
         results = []
 
+        
+        KE0, PE0, E0 = self.compute_energy()
+        self.energy_history.append((t, KE0, PE0, E0))
+
         y = cluster.get_state_vector()
 
         while t < self.t_end and cluster.N >=2: 
@@ -243,6 +280,10 @@ class Simulator:
             cluster.update_state_vector(y)
 
             t = sol.t[-1]
+
+            
+            KE, PE, E_tot = self.compute_energy()
+            self.energy_history.append((t, KE, PE, E_tot))
 
             if verbose: print(f"[t = {t:4f}] N = {cluster.N}")
 
@@ -270,7 +311,9 @@ class Simulator:
                     if verbose: print(f"   scattered(elastic)")
 
                 y = cluster.get_state_vector()
-
+                KE, PE, E_tot = self.compute_energy()
+                self.energy_history.append((t, KE, PE, E_tot))
+                
             results.append((t, cluster.m.copy(), cluster.r.copy(), cluster.v.copy()))
 
         return results
@@ -295,10 +338,10 @@ class Analysis:
 
 def demo_run():
     """Run a short demo with N ~ 50 to show the pipeline."""
-    N = 50
+    N = 100
     print("Initializing cluster...")
     cluster = StarClusters.initialize_random(N=N, mass_alpha=2.35, mass_min=0.5, mass_max=3.0,
-                                            radius_scale=1.0, velocity_scale=0.5, random_state=42)
+                                            radius_scale=1.0, velocity_scale=0.1, random_state=42)
     sim = Simulator(cluster, t_end=0.5, r_c=0.05, dt_event=0.01, max_step=0.005, rng_seed=123)
     t0 = time.time()
     results = sim.run(verbose=True)
