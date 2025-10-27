@@ -26,7 +26,7 @@ class SamplingTool:
         u = range_val.random(size)
 
         if alpha == 1.0: 
-            np.exp(u * (np.log(xmax) - np.log(xmin)) + np.log(xmin))
+            return np.exp(u * (np.log(xmax) - np.log(xmin)) + np.log(xmin))
         
         powl = 1.0 - alpha
         min_val = xmin ** powl 
@@ -37,19 +37,28 @@ class SamplingTool:
         return x 
     
     @staticmethod
-    def rejection_sampling_MB(scale, size = 1, vmax = None, random_state = None):
-        range_val = np.random.default_rng(random_state)
-        if vmax is None: 
-            vmax = scale * 6
-        sample = [] 
+    
+    def rejection_sampling_MB(scale, size=1, vmax=None, random_state=None):
+        rng = np.random.default_rng(random_state)
+        if vmax is None:
+            vmax = 6 * scale
 
-        n = size 
-        vx = range_val.normal(scale = scale, size =n)
-        vy = range_val.normal(scale = scale, size = n)
-        vz = range_val.normal(scale = scale, size =n) 
-        speeds = np.sqrt(vx**2 + vy**2 + vz**2) 
+    # Normalization constant is irrelevant for rejection ratio
+        def pdf(v): 
+            return v**2 * np.exp(-(v/scale)**2)
 
-        return speeds
+    # Find approximate maximum of PDF
+        v_peak = scale * np.sqrt(2/3)
+        p_max = pdf(v_peak)
+
+        samples = []
+        while len(samples) < size:
+            v_candidate = rng.uniform(0, vmax)
+            u = rng.random()
+            if u < pdf(v_candidate) / p_max:
+                samples.append(v_candidate)
+
+        return np.array(samples)
     
 class StarClusters: 
     """stores star properties""" 
@@ -85,7 +94,7 @@ class StarClusters:
         vy = speeds* np.sin(theta) * np.sin(phi) 
         vz = speeds * np.cos(theta) 
 
-        vel = np.vstack([vx, vy,vx]).T
+        vel = np.vstack([vx, vy, vz]).T
 
         return cls(masses = masses, positions = pos, velocities = vel)
 
@@ -101,7 +110,7 @@ class StarClusters:
         N = self.N 
 
         r = y[:3*N].reshape((N,3))
-        v = y[3*N].reshape((N,3)) 
+        v = y[3*N:].reshape((N,3)) 
         self.r, self.v = r.copy(), v.copy() 
 
     def remove_index(self, idx): 
