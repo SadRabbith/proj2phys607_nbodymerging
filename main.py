@@ -141,27 +141,38 @@ class StarClusters:
 
     def scatter_pair_elastic(self, i, j):
         """
-        elastic scattering in the two-body approximation:
-        - Transform to center-of-mass frame, reflect relative velocity across line-of-centers randomly
-        - This is an approximation; in a real two-body scattering you'd solve for post-scatter velocities
-          given impact parameter and scattering law.
+        Perform elastic scattering between stars i and j.
+        
+        Uses standard elastic collision formula along line of centers.
+        Conserves both momentum and kinetic energy.
+        
+        Parameters
+        ----------
+        i, j : int
+            Indices of colliding stars
         """
         m1, m2 = self.m[i], self.m[j]
-        r_rel = self.r[i] - self.r[j]
-        rhat = r_rel / (np.linalg.norm(r_rel) + 1e-12)
         v1, v2 = self.v[i].copy(), self.v[j].copy()
-        v_cm = (m1 * v1 + m2 * v2) / (m1 + m2)
-        u1 = v1 - v_cm
-        u2 = v2 - v_cm
-        # reflect the component along rhat for each particle (simple model)
-        u1_par = np.dot(u1, rhat) * rhat
-        u1_perp = u1 - u1_par
-        u2_par = np.dot(u2, rhat) * rhat
-        u2_perp = u2 - u2_par
-        # swap parallel components (approx elastic exchange)
-        u1_par, u2_par = u2_par, u1_par
-        self.v[i] = v_cm + u1_par + u1_perp
-        self.v[j] = v_cm + u2_par + u2_perp
+        
+        # Line of centers (collision axis)
+        r_rel = self.r[i] - self.r[j]
+        r_hat = r_rel / (np.linalg.norm(r_rel) + 1e-12)
+        
+        # Velocity components along collision axis
+        v1_n = np.dot(v1, r_hat)
+        v2_n = np.dot(v2, r_hat)
+        
+        # Perpendicular components (unchanged in collision)
+        v1_perp = v1 - v1_n * r_hat
+        v2_perp = v2 - v2_n * r_hat
+        
+        # Standard elastic collision formula for normal components
+        v1_n_new = ((m1 - m2) * v1_n + 2 * m2 * v2_n) / (m1 + m2)
+        v2_n_new = ((m2 - m1) * v2_n + 2 * m1 * v1_n) / (m1 + m2)
+        
+        # Reconstruct velocities
+        self.v[i] = v1_n_new * r_hat + v1_perp
+        self.v[j] = v2_n_new * r_hat + v2_perp
 
 def ode_func(t, y, masses):
     """
@@ -208,6 +219,8 @@ class Simulator:
         self.p_merge_func = p_merge_func if p_merge_func is not None else default_merge
         self.max_step = max_step
         self.rng = np.random.default_rng(rng_seed)
+
+        self.energy_history = [] 
 
     def compute_energy(self):
         """
@@ -313,7 +326,7 @@ class Simulator:
                 y = cluster.get_state_vector()
                 KE, PE, E_tot = self.compute_energy()
                 self.energy_history.append((t, KE, PE, E_tot))
-                
+
             results.append((t, cluster.m.copy(), cluster.r.copy(), cluster.v.copy()))
 
         return results
@@ -326,42 +339,315 @@ class Analysis:
         """Compute total momentum difference (Note: merges alter N)"""
         P_before = np.sum(before_cluster.m[:, None] * before_cluster.v, axis=0)
         P_after = np.sum(after_cluster.m[:, None] * after_cluster.v, axis=0)
-        diff = np.linalg.norm(P_before - P_after)
-        return diff
+        abs_error = np.linalg.norm(P_before - P_after)
+        rel_error = abs_error/(np.linalg.norm(P_before) +1e-12)
+        return {
+            'P_initial': P_before,
+            'P_final': P_after,
+            'absolute_error': abs_error,
+            'relative_error': rel_error,
+            'passed': rel_error < tol
+        }
+
+    @staticmethod
+    def check_mass_conservation(before_cluster: StarClusters, after_cluster: StarClusters):
+        """
+        Check mass conservation between two cluster states.
+        
+        """
+        M_before = np.sum(before_cluster.m)
+        M_after = np.sum(after_cluster.m)
+        
+        abs_error = abs(M_after - M_before)
+        rel_error = abs_error / M_before
+        
+        return {
+            'M_initial': M_before,
+            'M_final': M_after,
+            'absolute_error': abs_error,
+            'relative_error': rel_error,
+            'passed': rel_error < 1e-10
+        }
+
+    @staticmethod
+    def analyze_energy_conservation(sim: Simulator):
+        if not sim.energy_history:
+            return {'error': 'No energy history available'}
+        
+        times = np.array([e[0] for e in sim.energy_history])
+        KE = np.array([e[1] for e in sim.energy_history])
+        PE = np.array([e[2] for e in sim.energy_history])
+        E_tot = np.array([e[3] for e in sim.energy_history])
+        
+        E_initial = E_tot[0]
+        E_final = E_tot[-1]
+        E_drift = E_final - E_initial
+        E_drift_pct = 100 * abs(E_drift) / abs(E_initial)
+        
+        # Find max absolute drift
+        E_drift_abs_max = np.max(np.abs(E_tot - E_initial))
+        E_drift_pct_max = 100 * E_drift_abs_max / abs(E_initial)
+        
+        return {
+            'times': times,
+            'KE': KE,
+            'PE': PE,
+            'E_tot': E_tot,
+            'E_initial': E_initial,
+            'E_final': E_final,
+            'drift_absolute': E_drift,
+            'drift_percent': E_drift_pct,
+            'drift_percent_max': E_drift_pct_max,
+            'passed': E_drift_pct < 10.0  # 10% is reasonable threshold
+        }
 
     @staticmethod
     def final_mass_stats(cluster: StarClusters):
+        """
+        Compute statistics of final mass distribution.
+        
+        Parameters
+        ----------
+        cluster : StarClusters
+            Cluster to analyze
+        
+        Returns
+        -------
+        dict
+            Dictionary of mass statistics
+        """
         ms = cluster.m
-        return {'N': cluster.N, 'min': float(ms.min()), 'max': float(ms.max()),
-                'mean': float(ms.mean()), 'median': float(np.median(ms))}
+        return {
+            'N': cluster.N, 
+            'min': float(ms.min()), 
+            'max': float(ms.max()),
+            'mean': float(ms.mean()), 
+            'median': float(np.median(ms)),
+            'std': float(ms.std())
+        }
 
+    @staticmethod
+    def print_validation_report(momentum_result, mass_result, energy_result):
+        """
+        Print formatted validation report.
+        
+        Parameters
+        ----------
+        momentum_result : dict
+            Output from check_momentum_conservation
+        mass_result : dict
+            Output from check_mass_conservation
+        energy_result : dict
+            Output from analyze_energy_conservation
+        """
+        print("\n" + "="*70)
+        print("VALIDATION REPORT")
+        print("="*70)
+        
+        # Momentum
+        print("\n[1] MOMENTUM CONSERVATION")
+        print("-" * 70)
+        P_i = momentum_result['P_initial']
+        P_f = momentum_result['P_final']
+        print(f"  Initial momentum: [{P_i[0]:+.6e}, {P_i[1]:+.6e}, {P_i[2]:+.6e}]")
+        print(f"  Final momentum:   [{P_f[0]:+.6e}, {P_f[1]:+.6e}, {P_f[2]:+.6e}]")
+        print(f"  Absolute error:    {momentum_result['absolute_error']:.6e}")
+        print(f"  Relative error:    {momentum_result['relative_error']:.6e}")
+        status = "✓ PASS" if momentum_result['passed'] else "✗ FAIL"
+        print(f"  Status: {status}")
+        
+        # Mass
+        print("\n[2] MASS CONSERVATION")
+        print("-" * 70)
+        print(f"  Initial total mass: {mass_result['M_initial']:.10f}")
+        print(f"  Final total mass:   {mass_result['M_final']:.10f}")
+        print(f"  Absolute error:     {mass_result['absolute_error']:.6e}")
+        print(f"  Relative error:     {mass_result['relative_error']:.6e}")
+        status = "✓ PASS (exact)" if mass_result['passed'] else "⚠ WARNING"
+        print(f"  Status: {status}")
+        
+        # Energy
+        print("\n[3] ENERGY EVOLUTION")
+        print("-" * 70)
+        if 'error' in energy_result:
+            print(f"  {energy_result['error']}")
+        else:
+            print(f"  Initial energy:     {energy_result['E_initial']:.10f}")
+            print(f"  Final energy:       {energy_result['E_final']:.10f}")
+            print(f"  Absolute drift:     {energy_result['drift_absolute']:+.6e}")
+            print(f"  Percent drift:      {energy_result['drift_percent']:+.4f}%")
+            print(f"  Max percent drift:  {energy_result['drift_percent_max']:.4f}%")
+            
+            status = "✓ ACCEPTABLE" if energy_result['passed'] else "⚠ HIGH DRIFT"
+            print(f"  Status: {status}")
+            
+            if not energy_result['passed']:
+                print("\n  Note: Energy drift > 10% may indicate:")
+                print("    - Need for smaller integration timestep")
+                print("    - Multiple inelastic mergers")
+                print("    - Close encounters causing numerical issues")
+        
+        print("\n" + "="*70)
+
+
+
+def plot_validation_results(results, sim, initial_cluster, save_path='validation_results.png'):
+    """
+    Create validation plots: energy conservation, momentum conservation, mass distribution.
+    
+    Parameters
+    ----------
+    results : list
+        Simulation results from sim.run()
+    sim : Simulator
+        Completed simulator instance
+    initial_cluster : StarClusters
+        Initial cluster state for comparison
+    save_path : str, optional
+        Path to save figure
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    # 1. Mass distribution evolution
+    ax = axes[0]
+    initial_masses = initial_cluster.m
+    final_masses = results[-1][1]
+    
+    bins = np.linspace(
+        min(initial_masses.min(), final_masses.min()),
+        max(initial_masses.max(), final_masses.max()),
+        20
+    )
+    
+    ax.hist(initial_masses, bins=bins, alpha=0.6, label='Initial', edgecolor='black')
+    ax.hist(final_masses, bins=bins, alpha=0.6, label='Final', edgecolor='black')
+    ax.set_xlabel('Mass', fontsize=12)
+    ax.set_ylabel('Count', fontsize=12)
+    ax.set_title('Mass Distribution Evolution', fontsize=13, fontweight='bold')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # 2. Energy conservation
+    ax = axes[1]
+    energy_data = Analysis.analyze_energy_conservation(sim)
+    if 'error' not in energy_data:
+        t_e = energy_data['times']
+        E_tot = energy_data['E_tot']
+        E_initial = energy_data['E_initial']
+        E_rel = 100 * (E_tot - E_initial) / abs(E_initial)
+        
+        ax.plot(t_e, E_rel, 'o-', markersize=4, linewidth=2, color='blue')
+        ax.axhline(0, color='r', linestyle='--', alpha=0.5, linewidth=2, label='Perfect conservation')
+        ax.set_xlabel('Time', fontsize=12)
+        ax.set_ylabel('Energy Drift (%)', fontsize=12)
+        ax.set_title('Energy Conservation', fontsize=13, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+    
+    # 3. Momentum conservation (show components)
+    ax = axes[2]
+    momentum_check = Analysis.check_momentum_conservation(initial_cluster, sim.cluster)
+    
+    P_i = momentum_check['P_initial']
+    P_f = momentum_check['P_final']
+    
+    components = ['x', 'y', 'z']
+    x_pos = np.arange(len(components))
+    width = 0.35
+    
+    ax.bar(x_pos - width/2, P_i, width, label='Initial', alpha=0.8, edgecolor='black')
+    ax.bar(x_pos + width/2, P_f, width, label='Final', alpha=0.8, edgecolor='black')
+    
+    ax.set_xlabel('Component', fontsize=12)
+    ax.set_ylabel('Momentum', fontsize=12)
+    ax.set_title('Momentum Conservation', fontsize=13, fontweight='bold')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(components)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    # Add error text
+    rel_err = momentum_check['relative_error']
+    ax.text(0.95, 0.95, f"Rel. error: {rel_err:.2e}", 
+            transform=ax.transAxes, 
+            verticalalignment='top',
+            horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+            fontsize=10)
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"\nPlot saved to: {save_path}")
+    plt.show()
 
 def demo_run():
-    """Run a short demo with N ~ 50 to show the pipeline."""
-    N = 100
-    print("Initializing cluster...")
-    cluster = StarClusters.initialize_random(N=N, mass_alpha=2.35, mass_min=0.5, mass_max=3.0,
-                                            radius_scale=1.0, velocity_scale=0.1, random_state=42)
-    sim = Simulator(cluster, t_end=0.5, r_c=0.05, dt_event=0.01, max_step=0.005, rng_seed=123)
+    """Run a demonstration simulation with validation."""
+    N = 50
+    
+    print("="*70)
+    print("N-BODY STAR CLUSTER SIMULATION")
+    print("="*70)
+    
+    print("\n[1/5] Initializing cluster...")
+    cluster = StarClusters.initialize_random(
+        N=N, 
+        mass_alpha=2.35, 
+        mass_min=0.5, 
+        mass_max=3.0,
+        radius_scale=1.0, 
+        velocity_scale=0.5, 
+        random_state=42
+    )
+    
+    # Store initial state for validation
+    initial_cluster = StarClusters(
+        cluster.m.copy(), 
+        cluster.r.copy(), 
+        cluster.v.copy()
+    )
+    
+    print(f"  Initial N: {N}")
+    print(f"  Total mass: {cluster.m.sum():.3f}")
+    
+    print("\n[2/5] Running simulation...")
+    sim = Simulator(
+        cluster, 
+        t_end=0.5, 
+        r_c=0.05, 
+        dt_event=0.01, 
+        max_step=0.005, 
+        rng_seed=123
+    )
+    
     t0 = time.time()
     results = sim.run(verbose=True)
-    t1 = time.time()
-    print(f"Simulation finished in {t1 - t0:.2f}s, steps recorded: {len(results)}")
+    runtime = time.time() - t0
+    
+    print(f"\n[3/5] Simulation completed in {runtime:.2f}s")
+    
     final_cluster = sim.cluster
-    print("Final mass stats:", Analysis.final_mass_stats(final_cluster))
-    # Optionally plot final mass histogram if matplotlib is available
-    try:
-        import matplotlib.pyplot as plt
-        m = final_cluster.m
-        plt.figure()
-        plt.hist(m, bins='auto')
-        plt.title("Final Mass Distribution")
-        plt.xlabel("Mass")
-        plt.ylabel("Count")
-        plt.show()
-    except Exception:
-        pass
+    n_mergers = N - final_cluster.N
+    
+    print("\n[4/5] Final state:")
+    print(f"  Final N: {final_cluster.N}")
+    print(f"  Mergers: {n_mergers}")
+    
+    print("\n[5/5] Validation:")
+    momentum_check = Analysis.check_momentum_conservation(initial_cluster, final_cluster)
+    mass_check = Analysis.check_mass_conservation(initial_cluster, final_cluster)
+    energy_check = Analysis.analyze_energy_conservation(sim)
+    
+    Analysis.print_validation_report(momentum_check, mass_check, energy_check)
+    
+    print("\nGenerating validation plots...")
+    plot_validation_results(results, sim, initial_cluster)
+    
+    print("\n" + "="*70)
+    print("DEMO COMPLETE")
+    print("="*70)
+    
+    return results, sim, initial_cluster
 
 
 if __name__ == "__main__":
-    demo_run()     
+    demo_run()
