@@ -403,19 +403,7 @@ class Analysis:
 
     @staticmethod
     def final_mass_stats(cluster: StarClusters):
-        """
-        Compute statistics of final mass distribution.
-        
-        Parameters
-        ----------
-        cluster : StarClusters
-            Cluster to analyze
-        
-        Returns
-        -------
-        dict
-            Dictionary of mass statistics
-        """
+
         ms = cluster.m
         return {
             'N': cluster.N, 
@@ -428,18 +416,7 @@ class Analysis:
 
     @staticmethod
     def print_validation_report(momentum_result, mass_result, energy_result):
-        """
-        Print formatted validation report.
-        
-        Parameters
-        ----------
-        momentum_result : dict
-            Output from check_momentum_conservation
-        mass_result : dict
-            Output from check_mass_conservation
-        energy_result : dict
-            Output from analyze_energy_conservation
-        """
+
         print("\n" + "="*70)
         print("VALIDATION REPORT")
         print("="*70)
@@ -453,7 +430,7 @@ class Analysis:
         print(f"  Final momentum:   [{P_f[0]:+.6e}, {P_f[1]:+.6e}, {P_f[2]:+.6e}]")
         print(f"  Absolute error:    {momentum_result['absolute_error']:.6e}")
         print(f"  Relative error:    {momentum_result['relative_error']:.6e}")
-        status = "✓ PASS" if momentum_result['passed'] else "✗ FAIL"
+        status = "PASS" if momentum_result['passed'] else "FAIL"
         print(f"  Status: {status}")
         
         # Mass
@@ -463,7 +440,7 @@ class Analysis:
         print(f"  Final total mass:   {mass_result['M_final']:.10f}")
         print(f"  Absolute error:     {mass_result['absolute_error']:.6e}")
         print(f"  Relative error:     {mass_result['relative_error']:.6e}")
-        status = "✓ PASS (exact)" if mass_result['passed'] else "⚠ WARNING"
+        status = "PASS (exact)" if mass_result['passed'] else "Not Conserved"
         print(f"  Status: {status}")
         
         # Energy
@@ -478,7 +455,7 @@ class Analysis:
             print(f"  Percent drift:      {energy_result['drift_percent']:+.4f}%")
             print(f"  Max percent drift:  {energy_result['drift_percent_max']:.4f}%")
             
-            status = "✓ ACCEPTABLE" if energy_result['passed'] else "⚠ HIGH DRIFT"
+            status = "ACCEPTABLE" if energy_result['passed'] else "HIGH DRIFT"
             print(f"  Status: {status}")
             
             if not energy_result['passed']:
